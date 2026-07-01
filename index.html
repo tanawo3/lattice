@@ -1,0 +1,55 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Lattice - a knowledge graph judged by consensus</title>
+<meta name="description" content="Assertions linked by citations on GenLayer. Each node is a claim with a source; a validator set reads the source and rules it supported or refuted. Drag the graph, watch knowledge hold up - or not." />
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Syne:wght@600;700;800&display=swap" rel="stylesheet">
+<link rel="preconnect" href="https://rsms.me/"><link rel="stylesheet" href="https://rsms.me/inter/inter.css">
+<link rel="stylesheet" href="https://unpkg.com/@phosphor-icons/web@2.1.1/src/bold/style.css">
+<link rel="stylesheet" href="https://unpkg.com/@phosphor-icons/web@2.1.1/src/fill/style.css">
+<link rel="stylesheet" href="./styles.css?v=1">
+</head>
+<body>
+
+<canvas id="graph"></canvas>
+
+<header class="hud">
+  <a class="brand" href="#"><span class="brand-mark"><i class="ph-fill ph-graph"></i></span> Lattice</a>
+  <div class="hud-stats" id="hudStats"></div>
+  <div class="hud-end">
+    <span id="walletslot"><button class="hbtn" id="connectBtn"><i class="ph-bold ph-wallet"></i> Connect</button></span>
+    <button class="hbtn accent" id="addBtn"><i class="ph-bold ph-plus"></i> New assertion</button>
+  </div>
+</header>
+
+<div class="legend">
+  <span class="lg"><i class="dot unverified"></i> Unverified</span>
+  <span class="lg"><i class="dot supported"></i> Supported</span>
+  <span class="lg"><i class="dot refuted"></i> Refuted</span>
+  <span class="lg hint"><i class="ph-bold ph-hand-grabbing"></i> drag nodes · scroll to zoom</span>
+</div>
+
+<!-- node detail panel -->
+<aside class="panel" id="panel" aria-hidden="true">
+  <button class="panel-x" id="panelX"><i class="ph-bold ph-x"></i></button>
+  <div id="panelBody"></div>
+</aside>
+
+<!-- bottom dock: add assertion -->
+<div class="dock" id="dock" aria-hidden="true">
+  <div class="dock-row">
+    <div class="dock-field grow"><label>Statement</label><input id="aStmt" maxlength="160" placeholder="A claim the source should support…" /></div>
+    <div class="dock-field grow"><label>Source URL</label><input id="aUrl" placeholder="https://…" /></div>
+    <div class="dock-field"><label>Cites</label><span class="cite-tag" id="citeTag">none</span></div>
+    <button class="hbtn accent" id="dockSubmit"><i class="ph-bold ph-plus-circle"></i> Add node</button>
+    <button class="hbtn ghost" id="dockClose"><i class="ph-bold ph-x"></i></button>
+  </div>
+</div>
+
+<div id="log"></div>
+<script type="module" src="./app.js?v=1"></script>
+</body>
+</html>

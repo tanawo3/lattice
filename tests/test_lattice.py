@@ -1,66 +1,132 @@
-"""Tests for LATTICE (direct runner). AI verify() validated live on studionet."""
+"""Executable Lattice V2 permissions and review-lifecycle tests."""
+
+import json
 from pathlib import Path
 
-CONTRACT = str(Path(__file__).resolve().parents[1] / "contracts" / "lattice.py")
-UNVERIFIED = 0; SUPPORTED = 1; REFUTED = 2
-ROOT = 2 ** 31 - 1
+
+CONTRACT = str(Path(__file__).resolve().parents[1] / "contracts" / "lattice_v2.py")
 
 
-def _assert(lat, vm, who, stmt="Water is composed of hydrogen and oxygen.", url="https://example.com", parent=ROOT):
-    vm.sender = who
-    return lat.assert_claim(stmt, url, parent)
+def _deploy_record(deploy, vm, owner):
+    vm.sender = owner
+    contract = deploy(CONTRACT)
+    record_id = contract.create_node("The public record supports this node", "https://example.com", "claim")
+    return contract, str(record_id)
 
 
-def test_assert_root(deploy, direct_vm, direct_alice):
-    lat = deploy(CONTRACT)
-    nid = _assert(lat, direct_vm, direct_alice)
-    assert nid == 0
-    n = lat.get_node(0)
-    assert n["status"] == UNVERIFIED
-    assert n["parent"] == ROOT
+def _mock_review(vm):
+    vm.mock_llm(
+        r"LatticeKnowledge, a neutral",
+        json.dumps({
+            "verdict": "supported",
+            "outcomeStatus": "supported",
+            "score": 86,
+            "confidenceBps": 8500,
+            "accuracyBps": 8400,
+            "authenticityBps": 8600,
+            "priorityStrengthBps": 8100,
+            "coordinateMatchBps": 9000,
+            "existenceBps": 9100,
+            "feasibilityBps": 8200,
+            "marketBps": 7600,
+            "executionRiskBps": 2100,
+            "supportBps": 8700,
+            "edgeConsistencyBps": 8300,
+            "summary": "Public evidence supports the reviewed record.",
+            "publicSummary": "Public evidence supports the reviewed record.",
+            "rationale": "The independent source and record align.",
+            "reasoningDigest": "Source-backed review completed.",
+            "recommendedNextStep": "finalize_after_review",
+            "riskFlags": [],
+            "sourceScores": [],
+            "sourceCredibility": [],
+            "signalCredibility": [],
+            "supportingSignalIds": [],
+            "contradictingSignalIds": [],
+            "supportingCitationIds": [],
+            "conflictingCitationIds": [],
+            "supportingEvidenceIds": [],
+            "conflictingEvidenceIds": [],
+            "contradictionIds": [],
+            "revisionRisks": [],
+            "missingEvidence": [],
+        }),
+    )
 
 
-def test_assert_with_citation(deploy, direct_vm, direct_alice):
-    lat = deploy(CONTRACT)
-    _assert(lat, direct_vm, direct_alice, stmt="Root claim")
-    _assert(lat, direct_vm, direct_alice, stmt="Child claim", parent=0)
-    n = lat.get_node(1)
-    assert n["parent"] == 0
+def _mock_ruling(vm, pattern, ruling, revised):
+    vm.mock_llm(
+        pattern,
+        json.dumps({
+            "ruling": ruling,
+            "revisedVerdict": revised,
+            "confidenceDeltaBps": -1100 if revised == "refuted" else 900,
+            "scoreDelta": -20 if revised == "refuted" else 18,
+            "reason": "The filing provides controlling public evidence.",
+            "reasoningDigest": "The reviewed outcome was revised.",
+            "riskFlags": [],
+        }),
+    )
 
 
-def test_requires_statement(deploy, direct_vm, direct_alice):
-    lat = deploy(CONTRACT)
+def test_owner_and_protocol_permissions_execute(
+    deploy, direct_vm, direct_alice, direct_bob
+):
+    contract, record_id = _deploy_record(deploy, direct_vm, direct_alice)
+
+    direct_vm.sender = direct_bob
+    with direct_vm.expect_revert("admin_only"):
+        contract.set_protocol("A controlled graph protocol")
+
+    direct_vm.sender = direct_bob
+    with direct_vm.expect_revert("record_operator_only"):
+        contract.add_evidence(record_id, "https://example.org", "archive", "Independent graph evidence")
+    with direct_vm.expect_revert("record_operator_only"):
+        contract.synthesize_with_genlayer(record_id)
+
+
+def test_challenge_and_appeal_revise_record_before_finalization(
+    deploy, direct_vm, direct_alice, direct_bob
+):
+    contract, record_id = _deploy_record(deploy, direct_vm, direct_alice)
     direct_vm.sender = direct_alice
-    with direct_vm.expect_revert("a statement is required"):
-        lat.assert_claim("  ", "https://x.com", ROOT)
+    _mock_review(direct_vm)
+    contract.synthesize_with_genlayer(record_id)
+    contract.open_challenge_window(record_id)
 
+    direct_vm.sender = direct_bob
+    challenge_id = contract.submit_challenge(
+        record_id,
+        "A newer source contradicts the reviewed result.",
+        "https://example.org/challenge",
+    )
 
-def test_requires_source(deploy, direct_vm, direct_alice):
-    lat = deploy(CONTRACT)
     direct_vm.sender = direct_alice
-    with direct_vm.expect_revert("a source URL is required"):
-        lat.assert_claim("stmt", "", ROOT)
+    with direct_vm.expect_revert("open_filing_blocks_finalize"):
+        contract.finalize_node(record_id)
 
+    _mock_ruling(direct_vm, r"resolving a CHALLENGE", "accepted", "refuted")
+    contract.resolve_challenge_with_genlayer(record_id, challenge_id)
+    record = json.loads(contract.get_knowledge_node(record_id))
+    assert record["verdict"] == "refuted"
 
-def test_bad_parent(deploy, direct_vm, direct_alice):
-    lat = deploy(CONTRACT)
+    direct_vm.sender = direct_bob
+    appeal_id = contract.submit_appeal(
+        record_id,
+        "A final publication restores the original result.",
+        "https://example.net/appeal",
+    )
+
     direct_vm.sender = direct_alice
-    with direct_vm.expect_revert("cited assertion does not exist"):
-        lat.assert_claim("stmt", "https://x.com", 5)
+    with direct_vm.expect_revert("open_filing_blocks_finalize"):
+        contract.finalize_node(record_id)
 
+    _mock_ruling(direct_vm, r"resolving a APPEAL", "granted", "supported")
+    contract.resolve_appeal_with_genlayer(record_id, appeal_id)
+    contract.finalize_node(record_id)
 
-def test_stats(deploy, direct_vm, direct_alice):
-    lat = deploy(CONTRACT)
-    _assert(lat, direct_vm, direct_alice, stmt="A")
-    _assert(lat, direct_vm, direct_alice, stmt="B")
-    s = lat.get_stats()
-    assert s["total"] == 2
-    assert s["unverified"] == 2
-
-
-def test_multiple(deploy, direct_vm, direct_alice):
-    lat = deploy(CONTRACT)
-    _assert(lat, direct_vm, direct_alice, stmt="One")
-    _assert(lat, direct_vm, direct_alice, stmt="Two")
-    assert lat.get_node_count() == 2
-    assert lat.get_node(1)["statement"] == "Two"
+    record = json.loads(contract.get_knowledge_node(record_id))
+    assert record["status"] == "FINALIZED"
+    assert record["verdict"] == "supported"
+    assert record["challengeIds"] == [challenge_id]
+    assert record["appealIds"] == [appeal_id]

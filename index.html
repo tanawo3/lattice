@@ -11,8 +11,10 @@
 <link rel="stylesheet" href="https://unpkg.com/@phosphor-icons/web@2.1.1/src/bold/style.css">
 <link rel="stylesheet" href="https://unpkg.com/@phosphor-icons/web@2.1.1/src/fill/style.css">
 <link rel="stylesheet" href="./styles.css?v=1">
+<style>.audit-sr-only{position:absolute!important;width:1px!important;height:1px!important;padding:0!important;margin:-1px!important;overflow:hidden!important;clip:rect(0,0,0,0)!important;white-space:nowrap!important;border:0!important}</style>
 </head>
 <body>
+<h1 class="audit-sr-only">Lattice knowledge graph</h1>
 
 <canvas id="graph"></canvas>
 
@@ -41,8 +43,8 @@
 <!-- bottom dock: add assertion -->
 <div class="dock" id="dock" aria-hidden="true">
   <div class="dock-row">
-    <div class="dock-field grow"><label>Statement</label><input id="aStmt" maxlength="160" placeholder="A claim the source should support…" /></div>
-    <div class="dock-field grow"><label>Source URL</label><input id="aUrl" placeholder="https://…" /></div>
+    <div class="dock-field grow"><label>Statement</label><input id="aStmt" maxlength="160" placeholder="A claim the source should support..." /></div>
+    <div class="dock-field grow"><label>Source URL</label><input id="aUrl" placeholder="https://..." /></div>
     <div class="dock-field"><label>Cites</label><span class="cite-tag" id="citeTag">none</span></div>
     <button class="hbtn accent" id="dockSubmit"><i class="ph-bold ph-plus-circle"></i> Add node</button>
     <button class="hbtn ghost" id="dockClose"><i class="ph-bold ph-x"></i></button>

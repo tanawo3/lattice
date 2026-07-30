@@ -169,6 +169,7 @@ def _dispute_prompt(kind, node, verdict, summary, claim, evidence_txt):
         "\n" + kind.upper() + " EVIDENCE (untrusted rendered page):\n" + evidence_txt +
         "\nReply with ONE JSON object only: {\"ruling\":\"" + opts + "\",\"confidenceDeltaBps\":<int -10000..10000>,"
         "\"reason\":\"short neutral reason\",\"riskFlags\":[\"...\"],\"reasoningDigest\":\"public conclusion only\"}"
+        + "\nRequired revisedVerdict options: supported|refuted|mixed|inconclusive."
     )
 
 
@@ -188,10 +189,12 @@ class LatticeKnowledge(gl.Contract):
     idx_node_evidence: TreeMap[str, str]
     recent_ids: DynArray[str]
     protocol: str
+    admin: str
     clock: u256
 
     def __init__(self) -> None:
         self.clock = 0
+        self.admin = gl.message.sender_address.as_hex
         self.protocol = "Knowledge nodes must be clear, source-backed, contradiction-aware, and connected with honest edge labels."
 
     def _ilist(self, tree: TreeMap[str, str], key: str) -> list:
@@ -236,8 +239,28 @@ class LatticeKnowledge(gl.Contract):
         node["status"] = status
 
     def _require_owner(self, node: dict, actor: str) -> None:
-        if node["author"].lower() != actor.lower():
-            raise Exception("unauthorized")
+        if str(actor).lower() != self.admin.lower() and str(node["author"]).lower() != str(actor).lower():
+            raise Exception("record_operator_only")
+
+
+    def _require_admin(self) -> None:
+        if gl.message.sender_address.as_hex.lower() != self.admin.lower():
+            raise Exception("admin_only")
+
+    def _has_open_filings(self, record: dict) -> bool:
+        for challenge_id in record.get("challengeIds", []):
+            try:
+                if json.loads(self.challenges[int(challenge_id)]).get("status") == "open":
+                    return True
+            except Exception:
+                continue
+        for appeal_id in record.get("appealIds", []):
+            try:
+                if json.loads(self.appeals[int(appeal_id)]).get("status") == "open":
+                    return True
+            except Exception:
+                continue
+        return False
 
     def _require_mutable(self, node: dict) -> None:
         if node["status"] in ("FINALIZED", "ARCHIVED"):
@@ -355,6 +378,7 @@ class LatticeKnowledge(gl.Contract):
     @gl.public.write
     def set_protocol(self, protocol: str) -> str:
         self.clock += 1
+        self._require_admin()
         actor = gl.message.sender_address.as_hex
         text = _s(protocol, 2200)
         if text == "":
@@ -405,6 +429,7 @@ class LatticeKnowledge(gl.Contract):
         self.clock += 1
         actor = gl.message.sender_address.as_hex
         node = self._load_node(node_id)
+        self._require_owner(node, actor)
         self._require_mutable(node)
         if node["status"] not in ("DRAFT", "OPEN", "UNDER_SYNTHESIS", "SYNTHESIZED"):
             raise Exception("invalid_transition")
@@ -429,6 +454,8 @@ class LatticeKnowledge(gl.Contract):
         actor = gl.message.sender_address.as_hex
         a = self._load_node(from_node_id)
         b = self._load_node(to_node_id)
+        self._require_owner(a, actor)
+        self._require_owner(b, actor)
         self._require_mutable(b)
         rel = _s(relation, 32).lower()
         if rel not in RELATIONS:
@@ -453,6 +480,7 @@ class LatticeKnowledge(gl.Contract):
         self.clock += 1
         actor = gl.message.sender_address.as_hex
         node = self._load_node(node_id)
+        self._require_owner(node, actor)
         self._require_mutable(node)
         c = _s(claim, 700)
         if c == "":
@@ -472,6 +500,7 @@ class LatticeKnowledge(gl.Contract):
         self.clock += 1
         actor = gl.message.sender_address.as_hex
         node = self._load_node(node_id)
+        self._require_owner(node, actor)
         self._require_mutable(node)
         if node["status"] not in ("OPEN", "DRAFT", "SYNTHESIZED"):
             raise Exception("invalid_transition")
@@ -486,6 +515,7 @@ class LatticeKnowledge(gl.Contract):
         self.clock += 1
         actor = gl.message.sender_address.as_hex
         node = self._load_node(node_id)
+        self._require_owner(node, actor)
         self._require_mutable(node)
         if node["status"] not in ("UNDER_SYNTHESIS", "OPEN", "SYNTHESIZED"):
             raise Exception("invalid_transition")
@@ -577,6 +607,7 @@ class LatticeKnowledge(gl.Contract):
         self.clock += 1
         actor = gl.message.sender_address.as_hex
         node = self._load_node(node_id)
+        self._require_owner(node, actor)
         if node["status"] != "CHALLENGE_WINDOW":
             raise Exception("invalid_transition")
         challenge = self._load_challenge(challenge_id)
@@ -594,7 +625,9 @@ class LatticeKnowledge(gl.Contract):
             except Exception:
                 txt = "[source unavailable]"
             raw = gl.nondet.exec_prompt(_dispute_prompt("challenge", node, node["verdict"], node["summary"], claim, txt), response_format="json")
-            return json.dumps(_norm_ruling(raw, ("accepted", "rejected", "partially_accepted", "inconclusive"), "inconclusive"), sort_keys=True)
+            normalized = _norm_ruling(raw, ("accepted", "rejected", "partially_accepted", "inconclusive"), "inconclusive")
+            normalized["revisedVerdict"] = _s(raw.get("revisedVerdict", raw.get("revisedOutcome", "")), 40).lower() if isinstance(raw, dict) else ""
+            return json.dumps(normalized, sort_keys=True)
 
         res = json.loads(gl.eq_principle.prompt_comparative(leader, "Equal if same ruling."))
         challenge["status"] = res["ruling"]
@@ -604,6 +637,10 @@ class LatticeKnowledge(gl.Contract):
         self.challenges[int(challenge_id)] = json.dumps(challenge)
         node["confidenceBps"] = max(0, min(10000, int(node["confidenceBps"]) + int(res["confidenceDeltaBps"])))
         if res["ruling"] in ("accepted", "partially_accepted"):
+            revised = str(res.get("revisedVerdict", "")).lower()
+            if revised not in ("supported", "refuted", "mixed", "inconclusive",):
+                revised = node["verdict"]
+            node["verdict"] = revised
             self._rep_bump(challenge["challenger"], 50, "successfulChallenges")
         elif res["ruling"] == "rejected":
             self._rep_bump(challenge["challenger"], -30, "failedChallenges")
@@ -616,6 +653,8 @@ class LatticeKnowledge(gl.Contract):
         self.clock += 1
         actor = gl.message.sender_address.as_hex
         node = self._load_node(node_id)
+        if self._has_open_filings(node):
+            raise Exception("open_filing_blocks_appeal")
         if node["status"] not in ("CHALLENGE_WINDOW", "APPEALED"):
             raise Exception("invalid_transition")
         r = _s(reason, 700)
@@ -639,6 +678,7 @@ class LatticeKnowledge(gl.Contract):
         self.clock += 1
         actor = gl.message.sender_address.as_hex
         node = self._load_node(node_id)
+        self._require_owner(node, actor)
         if node["status"] != "APPEALED":
             raise Exception("invalid_transition")
         appeal = self._load_appeal(appeal_id)
@@ -656,7 +696,9 @@ class LatticeKnowledge(gl.Contract):
             except Exception:
                 txt = "[source unavailable]"
             raw = gl.nondet.exec_prompt(_dispute_prompt("appeal", node, node["verdict"], node["summary"], reason, txt), response_format="json")
-            return json.dumps(_norm_ruling(raw, ("granted", "denied", "partially_granted", "inconclusive"), "inconclusive"), sort_keys=True)
+            normalized = _norm_ruling(raw, ("granted", "denied", "partially_granted", "inconclusive"), "inconclusive")
+            normalized["revisedVerdict"] = _s(raw.get("revisedVerdict", raw.get("revisedOutcome", "")), 40).lower() if isinstance(raw, dict) else ""
+            return json.dumps(normalized, sort_keys=True)
 
         res = json.loads(gl.eq_principle.prompt_comparative(leader, "Equal if same ruling."))
         appeal["status"] = res["ruling"]
@@ -665,6 +707,11 @@ class LatticeKnowledge(gl.Contract):
         appeal["riskFlags"] = res["riskFlags"]
         self.appeals[int(appeal_id)] = json.dumps(appeal)
         node["confidenceBps"] = max(0, min(10000, int(node["confidenceBps"]) + int(res["confidenceDeltaBps"])))
+        if res["ruling"] in ("granted", "partially_granted"):
+            revised = str(res.get("revisedVerdict", "")).lower()
+            if revised not in ("supported", "refuted", "mixed", "inconclusive",):
+                revised = node["verdict"]
+            node["verdict"] = revised
         before = node["status"]
         self._set_status(node, "CHALLENGE_WINDOW")
         self._add_audit(node, actor, "resolve_appeal_with_genlayer", res["reason"][:140], before, "CHALLENGE_WINDOW")
@@ -677,6 +724,8 @@ class LatticeKnowledge(gl.Contract):
         actor = gl.message.sender_address.as_hex
         node = self._load_node(node_id)
         self._require_owner(node, actor)
+        if self._has_open_filings(node):
+            raise Exception("open_filing_blocks_finalize")
         if node["status"] not in ("SYNTHESIZED", "CHALLENGE_WINDOW"):
             raise Exception("invalid_transition")
         if node["verdict"] == "unverified":

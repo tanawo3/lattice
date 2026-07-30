@@ -1,14 +1,25 @@
 import { makeReader, write, connectWallet, activeAccount, short, fmtErr }
-  from "../shared/genlayer-lite.js";
+  from "./shared/genlayer-lite.js";
+import { mountReviewDesk } from "./shared/review-desk.js";
 
 const CONTRACT = "0xd7CC7438EBe858be3d90Bd58897A1829190c7C7a";
 const { read } = makeReader(CONTRACT);
 const NOPARENT = 2 ** 31 - 1;
 const ST = { label: ["Unverified", "Supported", "Refuted"], key: ["unverified", "supported", "refuted"], hex: ["#3fc6ff", "#36d399", "#ff6b6b"] };
 const $ = (id) => document.getElementById(id);
+
+queueMicrotask(() => mountReviewDesk({
+  contract: CONTRACT, read, write, ensureWallet, fmtErr,
+  entity: "Knowledge node", idLabel: "Node ID", countMethod: "get_node_count", recordMethod: "get_knowledge_node",
+  openWindowMethod: "open_challenge_window", submitChallengeMethod: "submit_challenge", resolveChallengeMethod: "resolve_challenge_with_genlayer",
+  submitAppealMethod: "submit_appeal", resolveAppealMethod: "resolve_appeal_with_genlayer", finalMethod: "finalize_node", archiveMethod: "archive_node",
+  variant: "rail", kicker: "Contradiction control", title: "Lattice evidence junction",
+  intro: "Inspect one node in the knowledge graph, introduce contradictory evidence, resolve its effect on confidence, and finalize the surviving claim.",
+  finalLabel: "Finalize node", archiveLabel: "Archive node",
+}));
 const esc = (s) => (s || "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
 const hostOf = (u) => { try { return new URL(u).hostname.replace(/^www\./, ""); } catch (_) { return u; } };
-const clip = (s, n) => (s.length > n ? s.slice(0, n - 1) + "…" : s);
+const clip = (s, n) => (s.length > n ? s.slice(0, n - 1) + "..." : s);
 
 let account = null, raw = [], stats = null;
 let nodes = [], edges = [], sel = null, citeParent = NOPARENT;
@@ -27,8 +38,7 @@ function toast(msg, kind = "", title = "lattice") {
 async function load() {
   stats = await read("get_stats");
   const n = Number(await read("get_node_count"));
-  const out = [];
-  for (let i = 0; i < n; i++) out.push({ id: i, ...(await read("get_node", [i])) });
+  const out = await Promise.all(Array.from({ length: n }, (_, i) => read("get_node", [i]).then((record) => ({ id: i, ...record }))));
   raw = out;
   buildGraph();
   renderHud();
@@ -174,8 +184,8 @@ $("dockClose").onclick = closeDock;
 /* ---- actions ---- */
 async function doVerify(id) {
   if (!confirm("Verify this node? Validators read the source and rule it supported or refuted. Calls a real LLM consensus.")) return;
-  const btn = $("verifyBtn"); if (btn) { btn.disabled = true; btn.innerHTML = '<span class="spinner"></span> validators reading…'; }
-  try { await ensureWallet(); toast("Validators reading the source…", "", "verify"); await write(CONTRACT, "verify", [id]); toast("Settled on-chain.", "ok"); await load(); openPanel(id); }
+  const btn = $("verifyBtn"); if (btn) { btn.disabled = true; btn.innerHTML = '<span class="spinner"></span> validators reading...'; }
+  try { await ensureWallet(); toast("Validators reading the source...", "", "verify"); await write(CONTRACT, "verify", [id]); toast("Settled on-chain.", "ok"); await load(); openPanel(id); }
   catch (e) { toast(fmtErr(e), "err"); if (btn) { btn.disabled = false; btn.textContent = "Verify with validators"; } }
 }
 async function doAdd() {

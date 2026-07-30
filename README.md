@@ -10,7 +10,7 @@ Lattice models claims as connected nodes instead of isolated posts. Evidence, ed
 | --- | --- |
 | Live app | https://assmore22-lattice.vercel.app |
 | GitHub | https://github.com/assmore22/lattice |
-| Contract | https://explorer-studio.genlayer.com/contracts/0xd7CC7438EBe858be3d90Bd58897A1829190c7C7a |
+| Contract | https://explorer-studio.genlayer.com/address/0xd7CC7438EBe858be3d90Bd58897A1829190c7C7a |
 
 ## Chain Record
 

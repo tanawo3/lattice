@@ -8,7 +8,7 @@ Lattice models claims as connected nodes instead of isolated posts. Evidence, ed
 
 | Surface | Link |
 | --- | --- |
-| Live app | https://tanawo3-lattice.vercel.app |
+| Live app | https://lattice-knowledge-graph.vercel.app |
 | GitHub | https://github.com/tanawo3/lattice |
 | Contract | https://explorer-studio.genlayer.com/address/0xd7CC7438EBe858be3d90Bd58897A1829190c7C7a |
 

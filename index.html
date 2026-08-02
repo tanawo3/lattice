@@ -18,6 +18,14 @@
 
 <canvas id="graph"></canvas>
 
+<section class="graph-empty" id="graphEmpty" aria-live="polite" hidden>
+  <span class="graph-empty-mark"><i class="ph-bold ph-graph"></i></span>
+  <p class="graph-empty-kicker">Empty knowledge graph</p>
+  <h2>Start with one sourced assertion.</h2>
+  <p>Every node begins as an onchain claim. Add a public source, then connect evidence and contradictions as the graph grows.</p>
+  <button class="hbtn accent" id="emptyAddBtn"><i class="ph-bold ph-plus"></i> Create the first node</button>
+</section>
+
 <header class="hud">
   <a class="brand" href="#"><span class="brand-mark"><i class="ph-fill ph-graph"></i></span> Lattice</a>
   <div class="hud-stats" id="hudStats"></div>

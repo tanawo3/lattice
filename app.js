@@ -56,6 +56,7 @@ function buildGraph() {
   edges = [];
   nodes.forEach((n) => { if (n.parent !== NOPARENT && byId[n.parent]) edges.push({ a: byId[n.parent], b: n }); });
   window.__lat.nodes = nodes.length; window.__lat.edges = edges.length;
+  $("graphEmpty").hidden = nodes.length !== 0;
 }
 
 /* ---- simulation ---- */
@@ -186,6 +187,7 @@ $("panelX").onclick = () => { $("panel").setAttribute("aria-hidden", "true"); se
 function openDock() { $("dock").setAttribute("aria-hidden", "false"); $("aStmt").focus(); }
 function closeDock() { $("dock").setAttribute("aria-hidden", "true"); }
 $("addBtn").onclick = () => { citeParent = NOPARENT; $("citeTag").textContent = "none"; openDock(); };
+$("emptyAddBtn").onclick = () => { citeParent = NOPARENT; $("citeTag").textContent = "none"; openDock(); };
 $("dockClose").onclick = closeDock;
 
 /* ---- actions ---- */

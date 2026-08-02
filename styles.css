@@ -16,6 +16,13 @@ canvas#graph{position:fixed;inset:0;z-index:1;display:block;cursor:grab}
 .gl-review{position:relative;z-index:50;margin-top:100vh;min-height:100vh;background:var(--bg)}
 canvas#graph.grabbing{cursor:grabbing}
 
+.graph-empty{position:fixed;z-index:12;left:50%;top:50%;width:min(520px,calc(100vw - 48px));transform:translate(-50%,-50%);text-align:center;display:flex;flex-direction:column;align-items:center;color:var(--ink2)}
+.graph-empty[hidden]{display:none}
+.graph-empty-mark{width:54px;height:54px;display:grid;place-items:center;border:1px solid var(--line2);border-radius:14px;background:rgba(63,198,255,.08);color:var(--cyan);font-size:25px;box-shadow:0 18px 54px -24px rgba(63,198,255,.65)}
+.graph-empty-kicker{margin-top:18px;font-family:var(--mono);font-size:11px;text-transform:uppercase;letter-spacing:.12em;color:var(--cyan)}
+.graph-empty h2{margin-top:10px;font-family:var(--disp);font-size:clamp(28px,4vw,48px);line-height:1.05;color:#fff}
+.graph-empty>p:not(.graph-empty-kicker){max-width:480px;margin:15px auto 21px;font-size:15px;line-height:1.65;color:var(--ink2)}
+
 .hbtn{display:inline-flex;align-items:center;gap:7px;font-size:13.5px;font-weight:600;color:var(--ink);background:rgba(120,150,220,.1);border:1px solid var(--line2);border-radius:10px;padding:9px 15px;backdrop-filter:blur(10px);transition:.18s var(--ease)}
 .hbtn:hover{border-color:var(--cyan);color:#fff}
 .hbtn.accent{background:linear-gradient(120deg,var(--cyan),#2a9fe0);color:#04121f;border:none;box-shadow:0 8px 22px -8px rgba(63,198,255,.5)}

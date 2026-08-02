@@ -37,6 +37,7 @@ canvas#graph.grabbing{cursor:grabbing}
 .hud-stats b{color:#fff}.hud-stats .d-green{color:var(--green)}.hud-stats .d-red{color:var(--red)}.hud-stats .d-cyan{color:var(--cyan)}
 .hud-end{display:flex;align-items:center;gap:10px}
 @media(max-width:680px){.hud-stats{display:none}}
+@media(max-width:680px){.hud{gap:10px;padding:16px 18px}.brand{margin-right:auto}.hud-end{gap:8px}#addBtn{width:42px;height:42px;padding:0;justify-content:center;font-size:0}#addBtn i{font-size:17px}}
 
 .legend{position:fixed;left:24px;bottom:22px;z-index:20;display:flex;flex-direction:column;gap:8px;background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:13px 16px;backdrop-filter:blur(12px);font-size:12.5px;color:var(--ink2)}
 .legend .lg{display:flex;align-items:center;gap:9px}

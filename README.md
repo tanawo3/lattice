@@ -10,37 +10,31 @@ Lattice models claims as connected nodes instead of isolated posts. Evidence, ed
 | --- | --- |
 | Live app | https://lattice-knowledge-graph.vercel.app |
 | GitHub | https://github.com/tanawo3/lattice |
-| Contract | https://explorer-studio.genlayer.com/address/0xd7CC7438EBe858be3d90Bd58897A1829190c7C7a |
+| Contract | https://explorer-studio.genlayer.com/address/0xda1623CB747eb4CC9c33B17D4A40DA12948BAb13 |
 
 ## Chain Record
 
 - Network: GenLayer Studionet
 - Chain ID: 61999
-- Contract: `0xd7CC7438EBe858be3d90Bd58897A1829190c7C7a`
-- Deploy transaction: [0x09d1285e...d39906](https://explorer-studio.genlayer.com/tx/0x09d1285ed656871b559079322b1aee0d0764e89b17f5e4257be158c575d39906)
-- Deployed: `2026-06-23T13:38:18.578Z`
-- Source: `contracts/lattice_v2.py` (45,385 bytes)
+- Contract: `0xda1623CB747eb4CC9c33B17D4A40DA12948BAb13`
+- Deploy transaction: [0x697291e2...95a063](https://explorer-studio.genlayer.com/tx/0x697291e25ba229f363e3a538ca81c67b32194f4d4de4e0f19727a247f395a063)
+- Deployed: `2026-08-02T20:57:30.732Z`
+- Source: `contracts/lattice_v2.py` (50,477 bytes)
+- Source SHA-256: `1893812deffe366599435c51f01705270c6018edbc21dd42ebdcc4fea777a1f5`
 
 ## Protocol Path
 
-1. Create knowledge nodes.
-2. Link edges and evidence.
-3. File contradictions.
-4. Run synthesis.
-5. Update confidence and reputation.
+1. Create a claim node and connect it to cited nodes.
+2. Attach public evidence and independent contradiction reports.
+3. Run synthesis with exact agreement on verdict, confidence, evidence and risk fields.
+4. Keep the result inside a mandatory challenge and appeal window.
+5. Finalize only after every filing is resolved and the deadline has passed.
 
 The frontend reads nodes, edges, evidence sets, contradiction reports and synthesis views. Contract state is public; write actions still require a connected wallet on GenLayer Studionet.
 
-## Finalized Smoke
+## Verification
 
-| Action | Transaction |
-| --- | --- |
-| `set_protocol` | [0xe975649f...d1a844](https://explorer-studio.genlayer.com/tx/0xe975649f6376fa41dc195e2c5c4e953f686a25dde71270cf7d4ab37d9dd1a844) |
-| `create_node_root` | [0x371f1132...3d4ca0](https://explorer-studio.genlayer.com/tx/0x371f11323a19fc0eb0958ee25d33c531a1f66da0a1b6dfef2a307ee9943d4ca0) |
-| `create_node_child` | [0xa910b6c9...7164fe](https://explorer-studio.genlayer.com/tx/0xa910b6c9f210949b2bbf9727b48f954d11938e64fbf4a441fb30d66d5c7164fe) |
-| `connect_nodes` | [0xc9d26912...1aff9e](https://explorer-studio.genlayer.com/tx/0xc9d269126d61d96e4d67ddc17003f459cfd8964245693c02589c521eb91aff9e) |
-| `add_evidence` | [0xd7460c24...d70c02](https://explorer-studio.genlayer.com/tx/0xd7460c24e4c2645b779ebaf2e07055cd282740dce86cbc814558854949d70c02) |
-| `add_contradiction_report` | [0x7cfa5838...4ca963](https://explorer-studio.genlayer.com/tx/0x7cfa5838221f156979712fc999b99f7cd8c0e3aba3f21866fce33c44b74ca963) |
+`tests/test_lattice.py` covers the full graph path: nodes, edge, evidence, contradiction, synthesis, challenge, appeal and deadline-gated finalization. It also asserts validator agreement over every settlement-changing field. The suite passes 2/2.
 
 ## Local Run
 

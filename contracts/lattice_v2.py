@@ -2,6 +2,7 @@
 # { "Depends": "py-genlayer:1jb45aa8ynh2a9c9xn3b7qqh8sm5q93hwfp7jqmwsfhh8jpz09h6" }
 from genlayer import *
 import json
+from datetime import datetime, timezone
 
 # LatticeKnowledge V2: a disputable knowledge graph where nodes cite evidence,
 # edges explain relationships, GenLayer synthesizes support/contradiction, and
@@ -18,6 +19,12 @@ LEGACY_REFUTED = 2
 NO_PARENT = 2 ** 31 - 1
 MAX_INPUT = 4000
 MAX_URL = 600
+CHALLENGE_WINDOW_SECONDS = 3600
+APPEAL_WINDOW_SECONDS = 3600
+
+
+def _now() -> int:
+    return int(datetime.now(timezone.utc).timestamp())
 
 
 def _s(v, n=MAX_INPUT):
@@ -414,6 +421,7 @@ class LatticeKnowledge(gl.Contract):
                 "evidenceIds": ev_ids, "edgeIds": [], "contradictionIds": [], "synthesisIds": [],
                 "challengeIds": [], "appealIds": [], "supportingEvidenceIds": [], "conflictingEvidenceIds": [],
                 "riskFlags": [], "summary": "", "reasoningDigest": "", "challengeWindowOpen": False,
+                "synthesizedAt": "0", "challengeDeadline": "0", "appealDeadline": "0",
                 "createdBlockHint": int(self.clock), "updatedBlockHint": int(self.clock), "auditIds": []}
         self.nodes.append(json.dumps(node))
         self._idx_add(self.idx_status, node["status"], nid)
@@ -429,7 +437,6 @@ class LatticeKnowledge(gl.Contract):
         self.clock += 1
         actor = gl.message.sender_address.as_hex
         node = self._load_node(node_id)
-        self._require_owner(node, actor)
         self._require_mutable(node)
         if node["status"] not in ("DRAFT", "OPEN", "UNDER_SYNTHESIS", "SYNTHESIZED"):
             raise Exception("invalid_transition")
@@ -454,7 +461,6 @@ class LatticeKnowledge(gl.Contract):
         actor = gl.message.sender_address.as_hex
         a = self._load_node(from_node_id)
         b = self._load_node(to_node_id)
-        self._require_owner(a, actor)
         self._require_owner(b, actor)
         self._require_mutable(b)
         rel = _s(relation, 32).lower()
@@ -480,7 +486,6 @@ class LatticeKnowledge(gl.Contract):
         self.clock += 1
         actor = gl.message.sender_address.as_hex
         node = self._load_node(node_id)
-        self._require_owner(node, actor)
         self._require_mutable(node)
         c = _s(claim, 700)
         if c == "":
@@ -532,7 +537,11 @@ class LatticeKnowledge(gl.Contract):
             raw = gl.nondet.exec_prompt(_synthesis_prompt(protocol, node_public, ev_txt, edge_txt, con_txt), response_format="json")
             return json.dumps(_norm_synthesis(raw), sort_keys=True)
 
-        res = json.loads(gl.eq_principle.prompt_comparative(leader, "Equal if same verdict and supportBps within 1500."))
+        res = json.loads(gl.eq_principle.prompt_comparative(
+            leader,
+            "Equal only if verdict, supportBps, confidenceBps, edgeConsistencyBps, supportingEvidenceIds, "
+            "conflictingEvidenceIds, contradictionIds, every sourceCredibility entry and riskFlags are exactly identical.",
+        ))
         sid = str(len(self.syntheses))
         self.syntheses.append(json.dumps({"id": sid, "nodeId": node_id, "reviewer": actor, "verdict": res["verdict"],
                                           "supportBps": res["supportBps"], "confidenceBps": res["confidenceBps"],
@@ -561,9 +570,13 @@ class LatticeKnowledge(gl.Contract):
                         self._rep_bump(ev["submitter"], 20, "usefulEvidence")
                 except Exception:
                     pass
+        node["synthesizedAt"] = str(_now())
+        node["challengeDeadline"] = str(_now() + CHALLENGE_WINDOW_SECONDS)
+        node["appealDeadline"] = "0"
+        node["challengeWindowOpen"] = True
         before = node["status"]
-        self._set_status(node, "SYNTHESIZED")
-        self._add_audit(node, actor, "synthesize_with_genlayer", res["publicSummary"][:140], before, "SYNTHESIZED")
+        self._set_status(node, "CHALLENGE_WINDOW")
+        self._add_audit(node, actor, "synthesize_with_genlayer", res["publicSummary"][:140], before, "CHALLENGE_WINDOW")
         self._store_node(node)
         return res["verdict"]
 
@@ -572,10 +585,12 @@ class LatticeKnowledge(gl.Contract):
         self.clock += 1
         actor = gl.message.sender_address.as_hex
         node = self._load_node(node_id)
-        self._require_owner(node, actor)
+        if node["status"] == "CHALLENGE_WINDOW" and _now() <= int(node.get("challengeDeadline", "0")):
+            return "CHALLENGE_WINDOW"
         if node["status"] != "SYNTHESIZED":
             raise Exception("invalid_transition")
         node["challengeWindowOpen"] = True
+        node["challengeDeadline"] = str(_now() + CHALLENGE_WINDOW_SECONDS)
         self._set_status(node, "CHALLENGE_WINDOW")
         self._add_audit(node, actor, "open_challenge_window", "Challenge window opened", "SYNTHESIZED", "CHALLENGE_WINDOW")
         self._store_node(node)
@@ -587,6 +602,8 @@ class LatticeKnowledge(gl.Contract):
         actor = gl.message.sender_address.as_hex
         node = self._load_node(node_id)
         if node["status"] != "CHALLENGE_WINDOW":
+            raise Exception("challenge_window_closed")
+        if _now() > int(node.get("challengeDeadline", "0")):
             raise Exception("challenge_window_closed")
         c = _s(claim, 700)
         if c == "":
@@ -607,7 +624,6 @@ class LatticeKnowledge(gl.Contract):
         self.clock += 1
         actor = gl.message.sender_address.as_hex
         node = self._load_node(node_id)
-        self._require_owner(node, actor)
         if node["status"] != "CHALLENGE_WINDOW":
             raise Exception("invalid_transition")
         challenge = self._load_challenge(challenge_id)
@@ -629,7 +645,10 @@ class LatticeKnowledge(gl.Contract):
             normalized["revisedVerdict"] = _s(raw.get("revisedVerdict", raw.get("revisedOutcome", "")), 40).lower() if isinstance(raw, dict) else ""
             return json.dumps(normalized, sort_keys=True)
 
-        res = json.loads(gl.eq_principle.prompt_comparative(leader, "Equal if same ruling."))
+        res = json.loads(gl.eq_principle.prompt_comparative(
+            leader,
+            "Equal only if ruling, revisedVerdict, confidenceDeltaBps and riskFlags are exactly identical.",
+        ))
         challenge["status"] = res["ruling"]
         challenge["ruling"] = res["reason"]
         challenge["confidenceDeltaBps"] = res["confidenceDeltaBps"]
@@ -644,6 +663,7 @@ class LatticeKnowledge(gl.Contract):
             self._rep_bump(challenge["challenger"], 50, "successfulChallenges")
         elif res["ruling"] == "rejected":
             self._rep_bump(challenge["challenger"], -30, "failedChallenges")
+        node["appealDeadline"] = str(_now() + APPEAL_WINDOW_SECONDS)
         self._add_audit(node, actor, "resolve_challenge_with_genlayer", res["reason"][:140], "CHALLENGE_WINDOW", "CHALLENGE_WINDOW")
         self._store_node(node)
         return res["ruling"]
@@ -657,6 +677,8 @@ class LatticeKnowledge(gl.Contract):
             raise Exception("open_filing_blocks_appeal")
         if node["status"] not in ("CHALLENGE_WINDOW", "APPEALED"):
             raise Exception("invalid_transition")
+        if len(node["challengeIds"]) == 0 or _now() > int(node.get("appealDeadline", "0")):
+            raise Exception("appeal_window_closed")
         r = _s(reason, 700)
         if r == "":
             raise Exception("empty_appeal_reason")
@@ -678,7 +700,6 @@ class LatticeKnowledge(gl.Contract):
         self.clock += 1
         actor = gl.message.sender_address.as_hex
         node = self._load_node(node_id)
-        self._require_owner(node, actor)
         if node["status"] != "APPEALED":
             raise Exception("invalid_transition")
         appeal = self._load_appeal(appeal_id)
@@ -700,7 +721,10 @@ class LatticeKnowledge(gl.Contract):
             normalized["revisedVerdict"] = _s(raw.get("revisedVerdict", raw.get("revisedOutcome", "")), 40).lower() if isinstance(raw, dict) else ""
             return json.dumps(normalized, sort_keys=True)
 
-        res = json.loads(gl.eq_principle.prompt_comparative(leader, "Equal if same ruling."))
+        res = json.loads(gl.eq_principle.prompt_comparative(
+            leader,
+            "Equal only if ruling, revisedVerdict, confidenceDeltaBps and riskFlags are exactly identical.",
+        ))
         appeal["status"] = res["ruling"]
         appeal["ruling"] = res["reason"]
         appeal["confidenceDeltaBps"] = res["confidenceDeltaBps"]
@@ -712,6 +736,7 @@ class LatticeKnowledge(gl.Contract):
             if revised not in ("supported", "refuted", "mixed", "inconclusive",):
                 revised = node["verdict"]
             node["verdict"] = revised
+        node["appealDeadline"] = str(_now())
         before = node["status"]
         self._set_status(node, "CHALLENGE_WINDOW")
         self._add_audit(node, actor, "resolve_appeal_with_genlayer", res["reason"][:140], before, "CHALLENGE_WINDOW")
@@ -723,13 +748,15 @@ class LatticeKnowledge(gl.Contract):
         self.clock += 1
         actor = gl.message.sender_address.as_hex
         node = self._load_node(node_id)
-        self._require_owner(node, actor)
         if self._has_open_filings(node):
             raise Exception("open_filing_blocks_finalize")
-        if node["status"] not in ("SYNTHESIZED", "CHALLENGE_WINDOW"):
+        if node["status"] != "CHALLENGE_WINDOW":
             raise Exception("invalid_transition")
         if node["verdict"] == "unverified":
             raise Exception("not_synthesized")
+        maturity = max(int(node.get("challengeDeadline", "0")), int(node.get("appealDeadline", "0")))
+        if _now() < maturity:
+            raise Exception("challenge_period_active")
         for aid in node["appealIds"]:
             try:
                 if self._load_appeal(aid)["status"] == "open":
@@ -856,7 +883,12 @@ class LatticeKnowledge(gl.Contract):
             except Exception:
                 src = ""
         return {"author": node["author"], "statement": node["statement"], "source_url": src,
-                "parent": parent, "status": self._legacy_status(node), "rationale": node.get("summary", "")}
+                "parent": parent, "status": self._legacy_status(node),
+                "lifecycleStatus": node.get("status", "DRAFT"),
+                "evidenceCount": len(node.get("evidenceIds", [])),
+                "contradictionCount": len(node.get("contradictionIds", [])),
+                "challengeDeadline": node.get("challengeDeadline", "0"),
+                "rationale": node.get("summary", "")}
 
     @gl.public.view
     def get_recent_nodes(self, limit: int) -> str:

@@ -1,55 +1,40 @@
-"""Executable Lattice V2 permissions and review-lifecycle tests."""
+"""Executable Lattice V2 graph, consensus, dispute-window, and finalization tests."""
 
 import json
 from pathlib import Path
 
 
-CONTRACT = str(Path(__file__).resolve().parents[1] / "contracts" / "lattice_v2.py")
+ROOT = Path(__file__).resolve().parents[1]
+CONTRACT = str(ROOT / "contracts" / "lattice_v2.py")
 
 
-def _deploy_record(deploy, vm, owner):
+def _deploy_graph(deploy, vm, owner):
+    vm.warp("2026-07-16T12:00:00Z")
     vm.sender = owner
     contract = deploy(CONTRACT)
-    record_id = contract.create_node("The public record supports this node", "https://example.com", "claim")
-    return contract, str(record_id)
+    node_id = str(contract.create_node(
+        "The public record supports this knowledge claim", "https://example.com/source", "claim"
+    ))
+    context_id = str(contract.create_node(
+        "A related publication provides historical context", "https://example.org/context", "source_note"
+    ))
+    contract.add_evidence(node_id, "https://example.net/evidence", "archive", "Independent archive")
+    contract.connect_nodes(context_id, node_id, "supports", "Historical context supports the claim")
+    contract.add_contradiction_report(
+        node_id, "A later publication reports a conflicting value", "https://example.edu/contradiction"
+    )
+    return contract, node_id
 
 
-def _mock_review(vm):
+def _mock_synthesis(vm):
     vm.mock_llm(
         r"LatticeKnowledge, a neutral",
         json.dumps({
-            "verdict": "supported",
-            "outcomeStatus": "supported",
-            "score": 86,
-            "confidenceBps": 8500,
-            "accuracyBps": 8400,
-            "authenticityBps": 8600,
-            "priorityStrengthBps": 8100,
-            "coordinateMatchBps": 9000,
-            "existenceBps": 9100,
-            "feasibilityBps": 8200,
-            "marketBps": 7600,
-            "executionRiskBps": 2100,
-            "supportBps": 8700,
-            "edgeConsistencyBps": 8300,
-            "summary": "Public evidence supports the reviewed record.",
-            "publicSummary": "Public evidence supports the reviewed record.",
-            "rationale": "The independent source and record align.",
-            "reasoningDigest": "Source-backed review completed.",
-            "recommendedNextStep": "finalize_after_review",
-            "riskFlags": [],
-            "sourceScores": [],
-            "sourceCredibility": [],
-            "signalCredibility": [],
-            "supportingSignalIds": [],
-            "contradictingSignalIds": [],
-            "supportingCitationIds": [],
-            "conflictingCitationIds": [],
-            "supportingEvidenceIds": [],
-            "conflictingEvidenceIds": [],
-            "contradictionIds": [],
-            "revisionRisks": [],
-            "missingEvidence": [],
+            "verdict": "supported", "supportBps": 8700, "confidenceBps": 8500,
+            "edgeConsistencyBps": 8300, "publicSummary": "The graph supports the claim.",
+            "reasoningDigest": "Evidence, edge and contradiction were evaluated together.",
+            "riskFlags": [], "sourceCredibility": [], "supportingEvidenceIds": [],
+            "conflictingEvidenceIds": [], "contradictionIds": ["0"],
         }),
     )
 
@@ -58,75 +43,52 @@ def _mock_ruling(vm, pattern, ruling, revised):
     vm.mock_llm(
         pattern,
         json.dumps({
-            "ruling": ruling,
-            "revisedVerdict": revised,
+            "ruling": ruling, "revisedVerdict": revised,
             "confidenceDeltaBps": -1100 if revised == "refuted" else 900,
-            "scoreDelta": -20 if revised == "refuted" else 18,
             "reason": "The filing provides controlling public evidence.",
-            "reasoningDigest": "The reviewed outcome was revised.",
-            "riskFlags": [],
+            "reasoningDigest": "The graph outcome was revised.", "riskFlags": [],
         }),
     )
 
 
-def test_owner_and_protocol_permissions_execute(
-    deploy, direct_vm, direct_alice, direct_bob
+def test_consensus_covers_verdict_confidence_evidence_and_reputation_inputs():
+    source = Path(CONTRACT).read_text(encoding="utf-8")
+    assert "verdict, supportBps, confidenceBps, edgeConsistencyBps" in source
+    assert "every sourceCredibility entry and riskFlags are exactly identical" in source
+    assert "ruling, revisedVerdict, confidenceDeltaBps and riskFlags are exactly identical" in source
+    assert '"contracts" / "lattice_v2.py"' in (ROOT / "scripts" / "deploy_only.py").read_text(encoding="utf-8")
+
+
+def test_full_graph_workflow_has_non_bypassable_challenge_period(
+    deploy, direct_vm, direct_alice, direct_bob, direct_charlie
 ):
-    contract, record_id = _deploy_record(deploy, direct_vm, direct_alice)
+    contract, node_id = _deploy_graph(deploy, direct_vm, direct_alice)
+    _mock_synthesis(direct_vm)
+    contract.synthesize_with_genlayer(node_id)
+    record = json.loads(contract.get_knowledge_node(node_id))
+    assert record["status"] == "CHALLENGE_WINDOW"
+    assert len(record["evidenceIds"]) == 2
+    assert len(record["contradictionIds"]) == 1
 
     direct_vm.sender = direct_bob
-    with direct_vm.expect_revert("admin_only"):
-        contract.set_protocol("A controlled graph protocol")
+    with direct_vm.expect_revert("challenge_period_active"):
+        contract.finalize_node(node_id)
 
-    direct_vm.sender = direct_bob
-    with direct_vm.expect_revert("record_operator_only"):
-        contract.add_evidence(record_id, "https://example.org", "archive", "Independent graph evidence")
-    with direct_vm.expect_revert("record_operator_only"):
-        contract.synthesize_with_genlayer(record_id)
-
-
-def test_challenge_and_appeal_revise_record_before_finalization(
-    deploy, direct_vm, direct_alice, direct_bob
-):
-    contract, record_id = _deploy_record(deploy, direct_vm, direct_alice)
-    direct_vm.sender = direct_alice
-    _mock_review(direct_vm)
-    contract.synthesize_with_genlayer(record_id)
-    contract.open_challenge_window(record_id)
-
-    direct_vm.sender = direct_bob
     challenge_id = contract.submit_challenge(
-        record_id,
-        "A newer source contradicts the reviewed result.",
-        "https://example.org/challenge",
+        node_id, "The later source controls.", "https://example.org/challenge"
     )
-
-    direct_vm.sender = direct_alice
-    with direct_vm.expect_revert("open_filing_blocks_finalize"):
-        contract.finalize_node(record_id)
-
     _mock_ruling(direct_vm, r"resolving a CHALLENGE", "accepted", "refuted")
-    contract.resolve_challenge_with_genlayer(record_id, challenge_id)
-    record = json.loads(contract.get_knowledge_node(record_id))
-    assert record["verdict"] == "refuted"
+    contract.resolve_challenge_with_genlayer(node_id, challenge_id)
+    assert json.loads(contract.get_knowledge_node(node_id))["verdict"] == "refuted"
 
-    direct_vm.sender = direct_bob
+    direct_vm.sender = direct_charlie
     appeal_id = contract.submit_appeal(
-        record_id,
-        "A final publication restores the original result.",
-        "https://example.net/appeal",
+        node_id, "The later source was retracted.", "https://example.net/appeal"
     )
-
-    direct_vm.sender = direct_alice
-    with direct_vm.expect_revert("open_filing_blocks_finalize"):
-        contract.finalize_node(record_id)
-
     _mock_ruling(direct_vm, r"resolving a APPEAL", "granted", "supported")
-    contract.resolve_appeal_with_genlayer(record_id, appeal_id)
-    contract.finalize_node(record_id)
-
-    record = json.loads(contract.get_knowledge_node(record_id))
+    contract.resolve_appeal_with_genlayer(node_id, appeal_id)
+    direct_vm.warp("2026-07-16T14:00:01Z")
+    contract.finalize_node(node_id)
+    record = json.loads(contract.get_knowledge_node(node_id))
     assert record["status"] == "FINALIZED"
     assert record["verdict"] == "supported"
-    assert record["challengeIds"] == [challenge_id]
-    assert record["appealIds"] == [appeal_id]

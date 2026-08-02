@@ -2,7 +2,7 @@ import { makeReader, write, connectWallet, activeAccount, short, fmtErr }
   from "./shared/genlayer-lite.js";
 import { mountReviewDesk } from "./shared/review-desk.js";
 
-const CONTRACT = "0xd7CC7438EBe858be3d90Bd58897A1829190c7C7a";
+const CONTRACT = "0xda1623CB747eb4CC9c33B17D4A40DA12948BAb13";
 const { read } = makeReader(CONTRACT);
 const NOPARENT = 2 ** 31 - 1;
 const ST = { label: ["Unverified", "Supported", "Refuted"], key: ["unverified", "supported", "refuted"], hex: ["#3fc6ff", "#36d399", "#ff6b6b"] };
@@ -49,7 +49,7 @@ function buildGraph() {
   nodes = raw.map((d, i) => {
     const p = prev[d.id];
     const ang = (i / Math.max(raw.length, 1)) * Math.PI * 2;
-    return { id: d.id, status: d.status, statement: d.statement, source_url: d.source_url, parent: d.parent, author: d.author, rationale: d.rationale,
+    return { id: d.id, status: d.status, lifecycleStatus: d.lifecycleStatus || "DRAFT", evidenceCount: Number(d.evidenceCount || 0), contradictionCount: Number(d.contradictionCount || 0), statement: d.statement, source_url: d.source_url, parent: d.parent, author: d.author, rationale: d.rationale,
       x: p ? p.x : Math.cos(ang) * 180 + (Math.random() - .5) * 40, y: p ? p.y : Math.sin(ang) * 180 + (Math.random() - .5) * 40, vx: 0, vy: 0, r: 22 };
   });
   const byId = {}; nodes.forEach((n) => byId[n.id] = n);
@@ -162,15 +162,22 @@ function openPanel(id) {
     ${reason}
     <div class="p-meta">
       <div class="p-kv"><span class="k">Cites</span><span class="v">${par}</span></div>
+      <div class="p-kv"><span class="k">Lifecycle</span><span class="v">${esc(n.lifecycleStatus)}</span></div>
+      <div class="p-kv"><span class="k">Evidence</span><span class="v">${n.evidenceCount} sources</span></div>
+      <div class="p-kv"><span class="k">Contradictions</span><span class="v">${n.contradictionCount}</span></div>
       <div class="p-kv"><span class="k">Source</span><span class="v"><a href="${esc(n.source_url)}" target="_blank" rel="noopener">${esc(hostOf(n.source_url))} ↗</a></span></div>
       <div class="p-kv"><span class="k">Author</span><span class="v">${short(n.author)}</span></div>
     </div>
     <div class="p-actions">
-      ${n.status === 0 ? `<button class="hbtn accent" id="verifyBtn"><i class="ph-bold ph-shield-check"></i> Verify with validators</button>` : ""}
+      ${["DRAFT", "OPEN", "UNDER_SYNTHESIS"].includes(n.lifecycleStatus) ? `<button class="hbtn accent" id="verifyBtn"><i class="ph-bold ph-shield-check"></i> Synthesize graph evidence</button>` : ""}
+      <button class="hbtn ghost" id="evidenceBtn"><i class="ph-bold ph-link-simple"></i> Add evidence</button>
+      <button class="hbtn ghost" id="contradictionBtn"><i class="ph-bold ph-warning-diamond"></i> Report contradiction</button>
       <button class="hbtn ghost" id="citeBtn"><i class="ph-bold ph-arrow-bend-down-right"></i> Cite this node</button>
     </div>`;
   $("panel").setAttribute("aria-hidden", "false");
   if ($("verifyBtn")) $("verifyBtn").onclick = () => doVerify(n.id);
+  $("evidenceBtn").onclick = () => doAddEvidence(n.id);
+  $("contradictionBtn").onclick = () => doContradiction(n.id);
   $("citeBtn").onclick = () => { citeParent = n.id; $("citeTag").textContent = "#" + n.id; openDock(); };
 }
 $("panelX").onclick = () => { $("panel").setAttribute("aria-hidden", "true"); sel = null; };
@@ -185,7 +192,7 @@ $("dockClose").onclick = closeDock;
 async function doVerify(id) {
   if (!confirm("Verify this node? Validators read the source and rule it supported or refuted. Calls a real LLM consensus.")) return;
   const btn = $("verifyBtn"); if (btn) { btn.disabled = true; btn.innerHTML = '<span class="spinner"></span> validators reading...'; }
-  try { await ensureWallet(); toast("Validators reading the source...", "", "verify"); await write(CONTRACT, "verify", [id]); toast("Settled on-chain.", "ok"); await load(); openPanel(id); }
+  try { await ensureWallet(); toast("Validators reading graph evidence and contradictions...", "", "verify"); await write(CONTRACT, "synthesize_with_genlayer", [String(id)]); toast("Synthesis recorded; challenge period opened.", "ok"); await load(); openPanel(id); }
   catch (e) { toast(fmtErr(e), "err"); if (btn) { btn.disabled = false; btn.textContent = "Verify with validators"; } }
 }
 async function doAdd() {
@@ -195,12 +202,28 @@ async function doAdd() {
   const btn = $("dockSubmit"); btn.disabled = true; btn.innerHTML = '<span class="spinner"></span> adding';
   try {
     await ensureWallet();
-    await write(CONTRACT, "assert_claim", [stmt, url, citeParent]);
+    const nodeId = String(Number(await read("get_node_count")));
+    await write(CONTRACT, "create_node", [stmt, url, "claim"]);
+    if (citeParent !== NOPARENT) await write(CONTRACT, "connect_nodes", [String(citeParent), nodeId, "supports", "Source-backed citation edge"]);
     toast("Node added to the lattice.", "ok");
     $("aStmt").value = $("aUrl").value = ""; closeDock(); await load();
   } catch (e) { toast(fmtErr(e), "err"); btn.disabled = false; btn.innerHTML = "Add node"; }
 }
 $("dockSubmit").onclick = doAdd;
+
+async function doAddEvidence(id) {
+  const url = prompt("Public evidence URL"); if (!url) return;
+  const note = prompt("What does this source contribute?") || "Additional public evidence";
+  try { await ensureWallet(); await write(CONTRACT, "add_evidence", [String(id), url, "supporting", note]); toast("Evidence added to the node.", "ok"); await load(); openPanel(id); }
+  catch (e) { toast(fmtErr(e), "err"); }
+}
+
+async function doContradiction(id) {
+  const claim = prompt("Describe the contradiction"); if (!claim) return;
+  const url = prompt("Public evidence URL for the contradiction"); if (!url) return;
+  try { await ensureWallet(); await write(CONTRACT, "add_contradiction_report", [String(id), claim, url]); toast("Contradiction attached to the graph.", "ok"); await load(); openPanel(id); }
+  catch (e) { toast(fmtErr(e), "err"); }
+}
 
 /* ---- wallet ---- */
 async function refreshWallet() {
